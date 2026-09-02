@@ -1,0 +1,3 @@
+PySide6
+maya-stubs
+pytest

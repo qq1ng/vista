@@ -1,0 +1,40 @@
+# .gitignore for vista
+# Git reads this file. Git does not track a path that matches a line here.
+
+# --- Python bytecode and build output ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Virtual environments ---
+# .venv311 is about 200 MB and holds Windows binaries.
+# It does not work on another machine. requirements.txt records the packages.
+.venv311/
+.venv310/
+.venv/
+
+# --- Test and type-checker caches ---
+.pytest_cache/
+.mypy_cache/
+
+# --- Editor settings ---
+# settings.json holds an absolute path to the Unreal PythonStub on this machine.
+# That path breaks on a clean machine. The README explains the setup instead.
+.vscode/
+.idea/
+
+# --- Maya scratch files ---
+*.swatches
+incrementalSave/
+
+# --- Tool output from a test run ---
+# The tool writes FBX and manifest files here.
+# Sample files go in examples/ and those are committed.
+output/
+*.log
+
+# --- Windows ---
+Thumbs.db
+Desktop.ini

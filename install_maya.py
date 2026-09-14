@@ -70,7 +70,9 @@ def add_shelf_button():
 
 # installs vista: the Python path for this session and every later start, and the shelf button
 def install():
-    if REPO_ROOT not in sys.path:
+    # while the drop runs, Maya puts this folder at sys.path[0] and removes sys.path[0] afterwards,
+    # so the check skips position 0, or the path would vanish right after the install
+    if REPO_ROOT not in sys.path[1:]:
         sys.path.append(REPO_ROOT)
 
     user_setup_path = get_user_setup_path()

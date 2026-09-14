@@ -75,6 +75,29 @@ def test_filmback_preset_none_when_nothing_matches():
     assert validate.find_filmback_preset(36.0, 24.0, presets) is None
 
 
+def test_missing_fbx_file_is_an_error(tmp_path):
+    manifest_path = str(tmp_path / "manifest.json")
+    (tmp_path / "A.fbx").write_text("fbx", encoding="utf-8")
+    data = make_manifest([make_shot("A", 1, 60), make_shot("B", 61, 120)])
+    issues = validate.check_files_exist(data, manifest_path)
+    assert levels(issues) == [validate.ERROR]
+    assert "'B'" in issues[0]["message"]
+
+
+def test_summarize_issues_counts_levels():
+    issues = [
+        validate.make_issue(validate.ERROR, "a"),
+        validate.make_issue(validate.WARNING, "b"),
+        validate.make_issue(validate.WARNING, "c"),
+        validate.make_issue(validate.INFO, "d"),
+    ]
+    assert validate.summarize_issues(issues) == "1 error, 2 warnings"
+
+
+def test_summarize_no_issues():
+    assert validate.summarize_issues([]) == "0 errors, 0 warnings"
+
+
 def test_format_issue():
     issue = validate.make_issue(validate.ERROR, "Broken.")
     assert validate.format_issue(issue) == "[ERROR] Broken."

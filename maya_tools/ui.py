@@ -19,6 +19,7 @@ from maya_tools import scene_export
 
 WINDOW_NAME = "vistaExportWindow"
 OUTPUT_FOLDER_OPTION = "vistaOutputFolder"
+OPEN_FOLDER_OPTION = "vistaOpenFolder"
 LEVEL_COLORS = {
     validate.ERROR: "#e06c6c",
     validate.WARNING: "#e0b050",
@@ -36,6 +37,26 @@ def load_output_folder():
 # remembers the output folder for the next session
 def save_output_folder(folder):
     cmds.optionVar(stringValue=(OUTPUT_FOLDER_OPTION, folder))
+
+
+# the "open the folder after export" tick from the last session, on when never set
+def load_open_folder():
+    if cmds.optionVar(exists=OPEN_FOLDER_OPTION):
+        return cmds.optionVar(query=OPEN_FOLDER_OPTION) == 1
+    return True
+
+
+# remembers the tick for the next session
+def save_open_folder(checked):
+    if checked:
+        cmds.optionVar(intValue=(OPEN_FOLDER_OPTION, 1))
+    else:
+        cmds.optionVar(intValue=(OPEN_FOLDER_OPTION, 0))
+
+
+# opens a folder in the file browser of the operating system
+def open_folder(folder):
+    QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(folder))
 
 
 # adds one checkbox row to a list, value is the Maya node the row stands for
@@ -77,6 +98,8 @@ class VistaWindow(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         self.character_list = QtWidgets.QListWidget()
         self.folder_field = QtWidgets.QLineEdit(load_output_folder())
         self.browse_button = QtWidgets.QPushButton("Browse...")
+        self.open_folder_box = QtWidgets.QCheckBox("Open the folder after export")
+        self.open_folder_box.setChecked(load_open_folder())
         self.refresh_button = QtWidgets.QPushButton("Refresh")
         self.check_button = QtWidgets.QPushButton("Check")
         self.export_button = QtWidgets.QPushButton("Export")
@@ -99,6 +122,7 @@ class VistaWindow(MayaQWidgetDockableMixin, QtWidgets.QWidget):
         layout.addWidget(self.character_list)
         layout.addWidget(QtWidgets.QLabel("Output folder"))
         layout.addLayout(folder_row)
+        layout.addWidget(self.open_folder_box)
         layout.addLayout(button_row)
         layout.addWidget(QtWidgets.QLabel("Messages"))
         layout.addWidget(self.message_list)
@@ -106,6 +130,7 @@ class VistaWindow(MayaQWidgetDockableMixin, QtWidgets.QWidget):
     # tells Qt which method runs when a button is clicked
     def connect_signals(self):
         self.browse_button.clicked.connect(self.browse)
+        self.open_folder_box.toggled.connect(save_open_folder)
         self.refresh_button.clicked.connect(self.refresh)
         self.check_button.clicked.connect(self.check)
         self.export_button.clicked.connect(self.export)
@@ -149,18 +174,37 @@ class VistaWindow(MayaQWidgetDockableMixin, QtWidgets.QWidget):
             return
         save_output_folder(folder)
 
-        manifest_path, issues = scene_export.export_scene(
-            folder,
-            camera_transforms=checked_values(self.camera_list),
-            character_roots=checked_values(self.character_list),
-            dry_run=dry_run,
-        )
+        self.set_busy(True)
+        try:
+            manifest_path, issues = scene_export.export_scene(
+                folder,
+                camera_transforms=checked_values(self.camera_list),
+                character_roots=checked_values(self.character_list),
+                dry_run=dry_run,
+            )
+        finally:
+            self.set_busy(False)
 
         if manifest_path is not None:
             issues.append(validate.make_issue(validate.INFO, f"Wrote {manifest_path}"))
+            issues.append(validate.make_issue(validate.INFO, "Next step, in Unreal: Vista > Build Last Export."))
+            if self.open_folder_box.isChecked():
+                open_folder(folder)
         elif dry_run and not validate.has_errors(issues):
             issues.append(validate.make_issue(validate.INFO, "Check passed. Nothing was written."))
         self.show_messages(issues)
+
+    # disables the buttons and shows a wait cursor while an export runs
+    def set_busy(self, busy):
+        self.refresh_button.setEnabled(not busy)
+        self.check_button.setEnabled(not busy)
+        self.export_button.setEnabled(not busy)
+        if busy:
+            QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+            # paints the disabled buttons now, before the slow export blocks the window
+            QtWidgets.QApplication.processEvents()
+        else:
+            QtWidgets.QApplication.restoreOverrideCursor()
 
     # one row per issue, colored by level
     def show_messages(self, issues):

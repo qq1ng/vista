@@ -1,3 +1,4 @@
+import os
 from core import cuts
 from core import manifest
 
@@ -23,6 +24,25 @@ def has_errors(issues):
 # one line of text for a log or a print
 def format_issue(issue):
     return f"[{issue['level'].upper()}] {issue['message']}"
+
+
+# the word, with an "s" when the count is not one
+def plural(count, word):
+    if count == 1:
+        return word
+    return word + "s"
+
+
+# counts errors and warnings for a one-line status, for example "0 errors, 1 warning"
+def summarize_issues(issues):
+    errors = 0
+    warnings = 0
+    for issue in issues:
+        if issue["level"] == ERROR:
+            errors = errors + 1
+        elif issue["level"] == WARNING:
+            warnings = warnings + 1
+    return f"{errors} {plural(errors, 'error')}, {warnings} {plural(warnings, 'warning')}"
 
 
 # rule: the manifest needs at least one shot
@@ -103,6 +123,21 @@ def check_overlaps(manifest_data):
                 f"Shot '{shot['name']}' starts at frame {shot['frame_start']}, before shot "
                 f"'{previous['name']}' ends at frame {previous['frame_end']}. The cut happens at "
                 f"frame {shot['frame_start']}. The last frames of '{previous['name']}' do not show.",
+            ))
+    return issues
+
+
+# rule: every FBX file the manifest names must exist
+# needs the manifest path, because the FBX paths are relative to it
+def check_files_exist(manifest_data, manifest_path):
+    issues = []
+    items = manifest_data["shots"] + manifest_data["characters"]
+    for item in items:
+        fbx_path = manifest.resolve_path(item["fbx_path"], manifest_path)
+        if not os.path.isfile(fbx_path):
+            issues.append(make_issue(
+                ERROR,
+                f"The FBX file for '{item['name']}' is missing: {fbx_path}. Export again from Maya.",
             ))
     return issues
 

@@ -47,11 +47,14 @@ flowchart LR
 
 ```
 vista/
-  core/            manifest format, cut list, validation rules    (plain Python)
-  maya_tools/      scene export, FBX settings, dockable window    (Maya)
-  unreal_tools/    sequence builder, Editor Utility Widget calls  (Unreal)
-  examples/        demo scene builder, headless batch export
-  tests/           pytest tests for core
+  core/              manifest format, cut list, validation rules, last export  (plain Python)
+  maya_tools/        scene export, FBX settings, dockable window               (Maya)
+  unreal_tools/      sequence builder, Vista menu, panel functions             (Unreal)
+    content/         EUW_Vista.uasset, the Vista panel
+  examples/          demo scene builder, headless batch export
+  tests/             pytest tests for core
+  install_maya.py    drag into the Maya viewport to install
+  init_unreal.py     adds the Vista menu when Unreal starts
 ```
 
 ---
@@ -76,6 +79,8 @@ vista/
   it keeps its link.
 - **Restored editor state.** The Maya selection is restored after export. The Unreal
   Interchange FBX setting is restored after the build.
+- **Last export.** Maya records each export. In Unreal, Build Last Export needs no path.
+- **Setup.** A drag-and-drop installer and a shelf button in Maya, a Vista menu in Unreal.
 - **Maya window.** Dockable, PySide6, with a PySide2 fallback.
 - **Batch export.** Headless with `mayapy`, with exit codes for a build machine.
 
@@ -93,22 +98,19 @@ vista/
 
 ## Install
 
-Clone the repository anywhere. The examples use `C:/tools/vista`.
+Clone the repository anywhere.
 
-**Maya.** Add the repository to Maya's Python path. Create or edit
-`Documents/maya/2026/scripts/userSetup.py`:
+**Maya.** Drag `install_maya.py` from the repository into the Maya viewport. It adds the
+repository to Maya's Python path in `userSetup.py`, and puts a **Vista** button on the current
+shelf.
 
-```python
-import sys
-VISTA_ROOT = "C:/tools/vista"
-if VISTA_ROOT not in sys.path:
-    sys.path.append(VISTA_ROOT)
-```
+**Unreal.**
 
-Restart Maya.
-
-**Unreal.** Open Edit > Project Settings > Plugins > Python > Additional Paths, and add the
-repository folder. Restart the editor.
+1. Open Edit > Project Settings > Plugins > Python > Additional Paths, and add the repository
+   folder.
+2. Copy `unreal_tools/content/EUW_Vista.uasset` into your project's `Content/Vista/` folder. The
+   asset needs Unreal Engine 5.5 or later.
+3. Restart the editor. The main menu bar now has a **Vista** menu.
 
 **Tests (optional).**
 
@@ -123,15 +125,18 @@ py -3.11 -m pytest
 
 ### 1. Export from Maya
 
-Open the window:
+Press the **Vista** shelf button.
 
-```python
-from maya_tools import ui
-ui.show()
-```
+| Control | Effect |
+|---|---|
+| Cameras, Characters | Tick what to export. Cameras without keys start unticked |
+| Output folder, Browse | Where the FBX files and `manifest.json` go |
+| Open the folder after export | Opens the output folder when the export is done |
+| Check | Runs every rule. Writes nothing |
+| Export | Runs every rule, then writes one FBX per camera and per character, and `manifest.json` |
 
-Tick the cameras and characters, pick an output folder, and press **Check**, then **Export**.
-The folder receives one FBX per camera, one per character, and `manifest.json`.
+Every export also records its manifest as the **last export**, so Unreal can find it without a
+path.
 
 Without the window:
 
@@ -148,20 +153,25 @@ mayapy examples/batch_export.py C:/vista_out path/to/scene.ma
 
 ### 2. Build in Unreal
 
-In the Output Log, with the dropdown set to `Python`:
+**Quick path:** Vista > **Build Last Export** builds the manifest Maya wrote last.
+
+**Panel:** Vista > **Open Panel**.
+
+| Control | Effect |
+|---|---|
+| Browse | Pick a manifest file |
+| Last Export | Fill in the manifest Maya wrote last |
+| Lock viewport to camera cuts | After the build, the viewport shows the shot through the cameras |
+| Check | Runs every rule. Builds nothing |
+| Build | Builds `/Game/Vista/LS_<scene name>` and opens it in Sequencer |
+
+The status line under the buttons shows the result. For details, type `Vista` in the Output Log
+search field.
+
+From Python:
 
 ```python
 from unreal_tools import build_sequence; build_sequence.build_from_manifest(r"C:/vista_out/manifest.json")
-```
-
-The sequence appears as `/Game/Vista/LS_<scene name>` and opens in Sequencer.
-
-For a button panel, create an Editor Utility Widget with a text box and two buttons. Each button
-runs one line through the **Execute Python Command** node:
-
-```python
-from unreal_tools import widget_actions; widget_actions.check(r"C:/vista_out/manifest.json")
-from unreal_tools import widget_actions; widget_actions.build(r"C:/vista_out/manifest.json")
 ```
 
 ---
@@ -233,6 +243,7 @@ unit.
 | A camera has no keys (it is skipped) | warning |
 | A shot has keys outside the scene range | warning |
 | A shot starts before the previous shot ends | warning |
+| An FBX file named in the manifest is missing (checked in Unreal) | error |
 | A shot's sensor matches, or does not match, an Unreal filmback preset | info |
 
 Errors stop the export before any file is written. Messages name the camera and the frames,

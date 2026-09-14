@@ -11,7 +11,7 @@ INTERCHANGE_FBX = "Interchange.FeatureFlags.Import.FBX"
 # sends each issue to the Output Log at matching level
 def log_issues(issues):
     for issue in issues:
-        text = validate.format_issue(issue)
+        text = "Vista: " + validate.format_issue(issue)
         if issue["level"] == validate.ERROR:
             unreal.log_error(text)
         elif issue["level"] == validate.WARNING:
@@ -26,7 +26,7 @@ def use_legacy_fbx_import():
     interchange_was_on = unreal.SystemLibrary.get_console_variable_bool_value(INTERCHANGE_FBX)
     if interchange_was_on:
         unreal.log_warning(
-            "Interchange FBX import is on. Vista switches to the legacy FBX importer "
+            "Vista: Interchange FBX import is on. Vista switches to the legacy FBX importer "
             "for this build, then switches it back."
         )
         unreal.SystemLibrary.execute_console_command(None, f"{INTERCHANGE_FBX} 0")
@@ -128,7 +128,7 @@ def add_shot_camera(sequence, shot, manifest_path, world):
     fbx_path = manifest.resolve_path(shot["fbx_path"], manifest_path)
     imported = unreal.SequencerTools.import_level_sequence_fbx(world, sequence, [binding], settings, fbx_path)
     if not imported:
-        unreal.log_error(f"Shot '{shot['name']}': the FBX import failed for {fbx_path}")
+        unreal.log_error(f"Vista: shot '{shot['name']}': the FBX import failed for {fbx_path}")
 
     # the lens goes on after the import, so the manifest has the last word
     # the spawned actor shows it now, the template keeps it after the sequence closes
@@ -231,7 +231,7 @@ def add_character(sequence, character, manifest_path):
     # two imports, two folders: the mesh first, then the animation onto the mesh's skeleton
     skeletal_mesh = import_character_mesh(fbx_path, folder)
     if skeletal_mesh is None:
-        unreal.log_error(f"Character '{character['name']}': the FBX import made no skeletal mesh.")
+        unreal.log_error(f"Vista: character '{character['name']}': the FBX import made no skeletal mesh.")
         return None
     skeleton = skeletal_mesh.get_editor_property("skeleton")
     animation = import_character_animation(fbx_path, f"{folder}/Animations", skeleton)
@@ -240,7 +240,7 @@ def add_character(sequence, character, manifest_path):
     binding.set_name(character["name"])
 
     if animation is None:
-        unreal.log_warning(f"Character '{character['name']}': the FBX holds no animation. It stands in its bind pose.")
+        unreal.log_warning(f"Vista: character '{character['name']}': the FBX holds no animation. It stands in its bind pose.")
         return binding
 
     # Sequencer adds default tracks to a new actor binding, an empty animation track among them
@@ -286,13 +286,23 @@ def build_sequence(manifest_data, manifest_path):
     return sequence
 
 
+# after a build: the playhead on the first frame, and optionally the viewport through the shot cameras
+# Unreal does not lock the viewport to the camera cuts by itself, so artists see no camera view
+def show_first_frame(scene, lock_viewport):
+    sequencer = unreal.LevelSequenceEditorBlueprintLibrary
+    sequencer.set_current_time(scene["frame_start"])
+    if lock_viewport:
+        sequencer.set_lock_camera_cut_to_viewport(True)
+
+
 # builds the whole Level Sequence from a manifest file
 # returns the sequence, or None when a rule failed and nothing was built
-def build_from_manifest(manifest_path):
+def build_from_manifest(manifest_path, lock_viewport=True):
     manifest_path = manifest_path.replace("\\", "/")
     manifest_data = manifest.read_manifest(manifest_path)
 
     issues = validate.validate_manifest(manifest_data)
+    issues.extend(validate.check_files_exist(manifest_data, manifest_path))
     issues.extend(validate.check_filmback_presets(manifest_data, get_filmback_presets()))
     log_issues(issues)
     if validate.has_errors(issues):
@@ -305,6 +315,7 @@ def build_from_manifest(manifest_path):
     finally:
         restore_fbx_import(interchange_was_on)
 
+    show_first_frame(manifest_data["scene"], lock_viewport)
     unreal.log(
         f"Vista: built {sequence.get_path_name()} with {len(manifest_data['shots'])} shots "
         f"and {len(manifest_data['characters'])} characters."

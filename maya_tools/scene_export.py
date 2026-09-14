@@ -1,6 +1,7 @@
 import os
 import maya.mel as mel
 import maya.cmds as cmds
+from core import last_export
 from core import manifest
 from core import validate
 from maya_tools import fbx_utils
@@ -125,4 +126,6 @@ def export_scene(output_folder, camera_transforms=None, character_roots=None, dr
         character_export.export_character(characters[index], fbx_path, scene_start, scene_end)
 
     manifest.write_manifest(manifest_data, manifest_path)
+    # Unreal's Build Last Export reads this, so nobody types the path
+    last_export.remember_last_export(manifest_path)
     return manifest_path, issues

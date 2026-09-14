@@ -1,107 +1,90 @@
 import maya.mel as mel
 import maya.cmds as cmds
-from core import manifest
+from maya_tools import fbx_utils
 
 
-# output cameras in scene and print shape, name, pos, rot, fl, aperture 
-def print_all_cameras():
-    for shape in cmds.ls(type="camera"):
-        transform = cmds.listRelatives(shape, parent=True)[0]
-        position = cmds.getAttr(f"{transform}.translate")
-        rotation = cmds.getAttr(f"{transform}.rotate")
-        focal_length = cmds.getAttr(f"{shape}.focalLength")
-        horizontal_film_aperture = cmds.getAttr(f"{shape}.horizontalFilmAperture")
-        vertical_film_aperture = cmds.getAttr(f"{shape}.verticalFilmAperture")
-        print(shape, transform, position, rotation, focal_length, horizontal_film_aperture, vertical_film_aperture)
-
-
-# creating a dict for each required datapoint. key_first/last gives 1 for each if cam is unkeyed
-def print_keyframe_data():
+# returns the transform of every camera the artist made, skips persp, top, front and side
+def get_export_cameras():
+    cameras = []
     for shape in cmds.ls(type="camera"):
         if not cmds.camera(shape, query=True, startupCamera=True):
-
-
             transform = cmds.listRelatives(shape, parent=True)[0]
-
-            # list of touples of plugs we want to check
-            plugs = [
-                (transform, "translateX"),
-                (transform, "translateY"),
-                (transform, "translateZ"),
-                (transform, "rotateX"),
-                (transform, "rotateY"),
-                (transform, "rotateZ"),
-                (shape, "focalLength"),
-            ]
-
-            # dict of keyframe times per plug
-            times = {}
-            for node, attribute in plugs:
-                plug = f"{node}.{attribute}"
-                times[attribute] = cmds.keyframe(plug, query=True, timeChange=True)
-
-            # dict of keyframe values per plug
-            values = {}
-            for node, attribute in plugs:
-                plug = f"{node}.{attribute}"
-                values[attribute] = cmds.keyframe(plug, query=True, valueChange=True)
-
-            # dict of keyframe amount per plug
-            key_count = {}
-            for node, attribute in plugs:
-                plug = f"{node}.{attribute}"
-                key_count[attribute] = cmds.keyframe(plug, query=True, keyframeCount=True)
-
-            key_first = {}
-            for node, attribute in plugs:
-                plug = f"{node}.{attribute}"
-                key_first[attribute] = cmds.findKeyframe(plug, which="first")
-
-            key_last = {}
-            for node, attribute in plugs:
-                plug = f"{node}.{attribute}"
-                key_last[attribute] = cmds.findKeyframe(plug, which="last")
-            
-            print("TIMES:", times, "VALUES:", values, "KEY AMOUNT:", key_count, "FIRST KEY:", key_first, "LAST KEY:", key_last,)
+            cameras.append(transform)
+    return cameras
 
 
-# exports cam with keyframes baked out to path
-def export_camera(camera_transform, fbx_path):
-    mel.eval("FBXResetExport;") 
+# returns the camera shape under a camera transform
+def get_camera_shape(camera_transform):
+    return cmds.listRelatives(camera_transform, shapes=True, type="camera")[0]
 
-    scene_start = cmds.playbackOptions(query=True, minTime=True)
-    scene_end = cmds.playbackOptions(query=True, maxTime=True)
 
-    mel.eval("FBXExportBakeComplexAnimation -v true;")
-    mel.eval(f"FBXExportBakeComplexStart -v {scene_start};")
-    mel.eval(f"FBXExportBakeComplexEnd -v {scene_end};")
-    mel.eval("FBXExportBakeComplexStep -v 1;")
-    mel.eval("FBXExportCameras -v true;")
-    cmds.select(camera_transform)
-    mel.eval(f'FBXExport -f "{fbx_path}" -s;')
+# list of (node, attribute) tuples, the seven channels the FBX carries
+def get_camera_plugs(camera_transform):
+    shape = get_camera_shape(camera_transform)
+    plugs = [
+        (camera_transform, "translateX"),
+        (camera_transform, "translateY"),
+        (camera_transform, "translateZ"),
+        (camera_transform, "rotateX"),
+        (camera_transform, "rotateY"),
+        (camera_transform, "rotateZ"),
+        (shape, "focalLength"),
+    ]
+    return plugs
 
-    return {
-    "fbx_path": fbx_path,
-    "frame_start": scene_start,
-    "frame_end": scene_end,
+
+# one dict per channel holding everything known about its keys
+# first and last stay None on unkeyed channels, because findKeyframe returns 1.0 there
+def get_keyframe_data(camera_transform):
+    channels = {}
+    for node, attribute in get_camera_plugs(camera_transform):
+        plug = f"{node}.{attribute}"
+        count = cmds.keyframe(plug, query=True, keyframeCount=True)
+        channel = {
+            "count": count,
+            "times": [],
+            "values": [],
+            "first": None,
+            "last": None,
+        }
+        if count > 0:
+            channel["times"] = cmds.keyframe(plug, query=True, timeChange=True)
+            channel["values"] = cmds.keyframe(plug, query=True, valueChange=True)
+            channel["first"] = cmds.findKeyframe(plug, which="first")
+            channel["last"] = cmds.findKeyframe(plug, which="last")
+        channels[attribute] = channel
+    return channels
+
+
+# first and last key over all seven channels, None if camera has no keys
+def get_key_range(camera_transform):
+    firsts = []
+    lasts = []
+    channels = get_keyframe_data(camera_transform)
+    for channel in channels.values():
+        if channel["count"] > 0:
+            firsts.append(channel["first"])
+            lasts.append(channel["last"])
+
+    if len(firsts) == 0:
+        return None
+    return min(firsts), max(lasts)
+
+
+# lens values at one frame, aperture stays in inches like Maya stores it
+def get_lens(camera_transform, frame):
+    shape = get_camera_shape(camera_transform)
+    lens = {
+        "focal_length": cmds.getAttr(f"{shape}.focalLength", time=frame),
+        "horizontal_film_aperture": cmds.getAttr(f"{shape}.horizontalFilmAperture", time=frame),
+        "vertical_film_aperture": cmds.getAttr(f"{shape}.verticalFilmAperture", time=frame),
+        "depth_of_field": cmds.getAttr(f"{shape}.depthOfField", time=frame),
     }
+    return lens
 
 
-# assembles and writes shot json using core manifest, exports baked camera fbx
-def export_shot(camera_transform, fbx_path, manifest_path):
-    shape = cmds.listRelatives(camera_transform, shapes=True)[0]
-    focal_length = cmds.getAttr(f"{shape}.focalLength")
-    horizontal_film_aperture = cmds.getAttr(f"{shape}.horizontalFilmAperture")
-    vertical_film_aperture = cmds.getAttr(f"{shape}.verticalFilmAperture")
-
-    fbx_result = export_camera(camera_transform, fbx_path)
-    shot = manifest.build_shot(
-        camera_transform,
-        fbx_path, 
-        fbx_result["frame_start"], 
-        fbx_result["frame_end"], 
-        focal_length, 
-        horizontal_film_aperture, 
-        vertical_film_aperture
-        )
-    manifest.write_manifest([shot], manifest_path)
+# exports one camera with its keys baked over the given range
+def export_camera(camera_transform, fbx_path, frame_start, frame_end):
+    fbx_utils.reset_fbx_export(frame_start, frame_end)
+    mel.eval("FBXExportCameras -v true;")
+    fbx_utils.export_nodes([camera_transform], fbx_path)
